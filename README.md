@@ -1,2 +1,2 @@
-# gpt-oss_agentic_robot
-gpt-oss 20b agentic cleaning robot NVIDIA Jetson myCobot280 
+# gpt-oss_robotic_agent
+NVIDIA Jetson Robot with gpt-oss 20b cleant agent
