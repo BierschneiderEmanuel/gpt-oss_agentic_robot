@@ -796,7 +796,8 @@ class Object_detect:
         # run YOLOv5 inference
         yolo_ret = _yolo_inf.run()
         for i in range(0, len(yolo_ret)):
-            if yolo_ret[i][0] == "person" or yolo_ret[i][0] == "fork" or yolo_ret[i][0] == "banana":  # \
+            # if yolo_ret[i][0] == "person" or
+            if yolo_ret[i][0] == "fork" or yolo_ret[i][0] == "banana":  # \
                 # or yolo_ret[i][0] == "person":
                 target_detected = yolo_ret[i][0]
                 # calculate new center target of the dectected reqctangle object
@@ -971,7 +972,7 @@ if __name__ == "__main__":
     # init speach engine
     engine = pyttsx3.init()
     # open the camera
-    cap_num = 2
+    cap_num = 2  # v4l2-ctl --list-devices
     cap = cv2.VideoCapture(cap_num)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, X_MAX_RES_ROBOT_ROS)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, Y_MAX_RES_ROBOT_ROS)
@@ -997,6 +998,9 @@ if __name__ == "__main__":
     detect_center_x = 0
     detect_center_y = 0
     size_distance_target = 0
+    rel_diff_z = 0.0
+    rel_diff_y = 0.0
+    rel_diff_x = 0.0
     set_gripper_async_flag = 0
     set_gripper_async_flag_max_cnt = 0
     set_async_flag = 0
@@ -1156,7 +1160,8 @@ if __name__ == "__main__":
         ):  # do not start detection during first run #do not detect during movement in case resync count is not 0(no movemnt in case resyc_cnt is zero)
             # for audio input
             # set initial angles
-            mycobot.send_angles([float(90), float(-20), float(-20), float(-20), float(0), float(0)])
+            # mycobot.send_angles([float(80), float(-20), float(-20), float(-20), float(0), float(0)])
+            mycobot.send_angles([float(130), float(-20), float(-20), float(-20), float(0), float(0)])
             # select microphone
             for index, name in enumerate(sr.Microphone.list_microphone_names()):
                 print(f"Device {index}: {name}")
@@ -1181,6 +1186,7 @@ if __name__ == "__main__":
                     response_text = ""
                     prompt = r.recognize_google(audio, language="en-EN", show_all=False)
                     print("You asked:", prompt)
+                    prompt = "Use DetectCleanliness tool and tell me if it is messy"
                     agent_runner = MultiToolAgent()
                     llm_with_image_context = agent_runner.run_prompts([f"{prompt.lower()}"])
                     # LLM TEST #########################
@@ -1212,23 +1218,24 @@ if __name__ == "__main__":
             print("first_run", first_run)
             # ctrl gripper
             set_gripper_async_flag_max_cnt = 5  # 20
-            if size_distance_target < 40 and set_gripper_async_flag < set_gripper_async_flag_max_cnt:  # set_async_flag run count <20
-                use_gripper_flag = 1
-                if use_gripper_flag == 1:
+            if size_distance_target > 160 and set_gripper_async_flag < set_gripper_async_flag_max_cnt:
+                if set_gripper_async_flag == 0 or set_gripper_async_flag > set_gripper_async_flag_max_cnt / 2:
                     gripper_open = 0
-                    if set_gripper_async_flag == 0 or set_gripper_async_flag < set_gripper_async_flag_max_cnt / 2:
-                        set_gripper_async_flag = 1
-                        mycobot.set_gripper_state(gripper_open, 95)
-                        print("set gripper open: {}".format(gripper_open))
-                        time.sleep(1)
-                    else:
-
-                        set_gripper_async_flag += 1
-                        gripper_close = 1
+                    set_gripper_async_flag = 1
+                    mycobot.set_gripper_state(gripper_open, 95)
+                    print("set gripper open: {}".format(gripper_open))
+                    # time.sleep(1)
+                else:
+                    set_gripper_async_flag += 1
+                    gripper_close = 1
+                    cnt = 0
+                    while cnt < 3:
                         mycobot.set_gripper_state(gripper_close, 95)
-                        print("set gripper close: {}".format(gripper_close))
-                        mycobot.send_angles([float(90), float(-20), float(-20), float(-20), float(0), float(0)])
-                        start_ros_movement = False  # reset movement flags after gripper action
+                        cnt += 1
+                    time.sleep(2)
+                    print("set gripper close: {}".format(gripper_close))
+                    mycobot.send_angles([float(90), float(-20), float(-20), float(-20), float(0), float(0)])
+                    start_ros_movement = False  # reset movement flags after gripper action
 
             frame_limit_num = 2  # 25
             frame_resync_limit_num = 5  # 35
@@ -1268,7 +1275,7 @@ if __name__ == "__main__":
                 print("c_cords=", moving_coords)
                 first_run = False
             else:  # limit to frame_limit_num frames
-                if frame_cnt > frame_limit_num:
+                if frame_cnt >= frame_limit_num:
                     print("____________________________________")
                     frame_cnt = 0
                     # calculate current error
@@ -1285,8 +1292,8 @@ if __name__ == "__main__":
                     #   | /
                     #   |/-----------Y
                     rel_diff_z = -error_z * 1  # 0.5    *1 because trash distance needs to be normalized to centimerter
-                    rel_diff_y = -error_y * 0.15  # 0.15   *0.15 because 1920x1080 needs to be normalized to centimeter of robot
-                    rel_diff_x = -error_x * 0.15  # 0.15   *0.15 because 1920x1080 needs to be normalized to centimeter of robot
+                    rel_diff_y = -error_y * 0.75  # *0.75 because 1920x1080 needs to be normalized to centimeter of robot
+                    rel_diff_x = -error_x * 0.75  # *0.75 because 1920x1080 needs to be normalized to centimeter of robot
                     ###rel_diff_z = +_BArel_diff_z #+rel_diff_z is move back if trash comes near and w is small in case face is near
                     rel_diff_z = -rel_diff_z  # -rel_diff_z is move forward if trash comes near and w is small in case face is near
                     if moving_coords:
@@ -1307,7 +1314,7 @@ if __name__ == "__main__":
                         or (abs(rel_diff_y) > rel_diff_y_min and abs(rel_diff_y) < rel_diff_y_max)
                         or (abs(rel_diff_x) > rel_diff_x_min and abs(rel_diff_x) < rel_diff_x_max)
                     ):
-                        scaler = 10.0  # 1000
+                        scaler = 2.0
                         # start_angles[0] += rel_diff_z
                         # start_angles[1] = q1 * adatp_multiplr
                         # start_angles[2] = q2 * adatp_multiplr
@@ -1316,7 +1323,7 @@ if __name__ == "__main__":
                         # print("target angles=", target_angles)
                         if set_async_flag == 0:  # only execute if there is no async movement
                             # x forward / backward #y left / right #z up / down
-                            mycobot.send_cartesian_waypoint([float(rel_diff_x) / scaler, float(rel_diff_y) / scaler, float(rel_diff_z) / scaler, float(0), float(0), float(0)])
+                            mycobot.send_cartesian_waypoint([float(rel_diff_x) * scaler, float(rel_diff_y) * scaler, float(rel_diff_z) * scaler, float(0), float(0), float(0)])
                             # start_ros_movement = False #reset movement flags after gripper action
                             start_yolo_detection = False  # reset detection flags
                         # update resync counter due to rounding and other precision limitations
@@ -1336,5 +1343,8 @@ if __name__ == "__main__":
                     if frame_cnt < 5:  # 5
                         temp_x = detect_center_x
                         temp_y = detect_center_y
-                        temp_z = size_distance_target
+                        if rel_diff_z > 0.0:
+                            temp_z = size_distance_target + rel_diff_z  # + rel_diff_z to bring trash closer
+                        else:
+                            temp_z = size_distance_target
                     frame_cnt += 1
