@@ -1385,11 +1385,4 @@ if __name__ == "__main__":
                             print("-->DIFF X ERROR<--")
                     print("#################################")
                 else:  # set update frame rate to 5 and ensure enought time for the actual movement
-                    # if frame_cnt > 5:  # 5
-                    #     temp_x = detect_center_x
-                    #     temp_y = detect_center_y
-                    #     if rel_diff_z > 0.0:
-                    #         temp_z = size_distance_target + rel_diff_z  # + rel_diff_z to bring trash closer
-                    #     else:
-                    #         temp_z = size_distance_target
                     frame_cnt += 1
