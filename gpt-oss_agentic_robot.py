@@ -1384,5 +1384,5 @@ if __name__ == "__main__":
                         if abs(rel_diff_x) < rel_diff_x_min or abs(rel_diff_x) > rel_diff_x_max:
                             print("-->DIFF X ERROR<--")
                     print("#################################")
-                else:  # set update frame rate to 5 and ensure enought time for the actual movement
+                else:  # update frame to ensure enought time for the actual movement
                     frame_cnt += 1
