@@ -104,6 +104,23 @@ glob_frame_bakllava = None
 glob_tool_call_history = []
 
 
+class _SuppressStderr:
+    """Context manager that redirects C-level stderr (fd 2) to /dev/null."""
+
+    def __enter__(self):
+        self.null_fd = os.open(os.devnull, os.O_RDWR)
+        self.saved_fd = os.dup(2)
+        os.dup2(self.null_fd, 2)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            os.dup2(self.saved_fd, 2)
+        finally:
+            os.close(self.saved_fd)
+            os.close(self.null_fd)
+
+
 class YoloInferencer:
     def __init__(self):
         # person, bicycle, car, motorbike, aeroplane, bus, train, truck, boat, traffic light, fire hydrant, stop sign, parking meter,
@@ -403,27 +420,26 @@ class MycobotServer:
 
     def connect(self):
         """(Re)create and connect the socket."""
-        if self.s is not None:
-            try:
-                self.s.close()
-            except Exception:
-                pass
-            self.s = None
-
-        for res in socket.getaddrinfo(self.host, self.port, socket.AF_UNSPEC, socket.SOCK_STREAM):
-            af, socktype, proto, canonname, sa = res
-            try:
-                self.s = socket.socket(af, socktype, proto)
-                self.s.connect(sa)
-                print(f"Connected to {self.host}:{self.port}")
-                return
-            except OSError as e:
-                if self.s:
+        while True:
+            if self.s is not None:
+                try:
                     self.s.close()
+                except Exception:
+                    pass
                 self.s = None
-                print("Connect attempt failed:", e)
 
-        raise ConnectionError(f"Could not connect to {self.host}:{self.port}")
+            for res in socket.getaddrinfo(self.host, self.port, socket.AF_UNSPEC, socket.SOCK_STREAM):
+                af, socktype, proto, canonname, sa = res
+                try:
+                    self.s = socket.socket(af, socktype, proto)
+                    self.s.connect(sa)
+                    print(f"Connected to {self.host}:{self.port}")
+                    return
+                except OSError as e:
+                    if self.s:
+                        self.s.close()
+                    self.s = None
+                    print(f"Could not connect to {self.host}:{self.port}: {e}")
 
     def close_connection(self):
         if self.s:
@@ -715,7 +731,7 @@ class Object_detect:
         return frame
 
     def generate_pipe_json_response(self, img_dat, prmpt="Is it dirty or messy in the picture?"):
-        data = json.dumps({"model": "bakllava", "prompt": prmpt, "images": img_dat})
+        data = json.dumps({"model": "bakllava", "prompt": "Is it dirty or messy in the picture?", "images": img_dat})
         full_response = ""
         line = ""
         with jsonstreams.Stream(jsonstreams.Type.array, filename="./response_log.txt") as output:
@@ -993,7 +1009,8 @@ if __name__ == "__main__":
     mycobot.send_angles([float(65), float(-3), float(-90), float(90), float(10), float(10)])  # upright position
     time.sleep(1)
     # init speach engine
-    engine = pyttsx3.init()
+    with _SuppressStderr():
+        engine = pyttsx3.init()
     # open the camera
     cap_num = 2  # v4l2-ctl --list-devices
     cap = cv2.VideoCapture(cap_num)
@@ -1188,24 +1205,23 @@ if __name__ == "__main__":
                 cv2.imshow("figure", glob_frame_bakllava)
                 # calculate the parameters of camera clipping
                 cv2.waitKey(1)
-                # # Init speech recognizer
-                # r = sr.Recognizer()
-                # # Wait for audio input
-                # with sr.Microphone(device_index=mic_index, sample_rate=48000, chunk_size=1024) as source:
-                #     print("Speak now:")
-                #     audio = r.listen(source)
-                # # Recognize the audio
+                # Init speech recognizer
+                r = sr.Recognizer()
+                # Wait for audio input
+                with sr.Microphone(device_index=mic_index, sample_rate=48000, chunk_size=1024) as source:
+                    print("Speak now:")
+                    audio = r.listen(source)
+                # Recognize the audio
                 try:
                     prompt = ""  # "Use DetectCleanliness tool and tell me if it is messy"
                     response_text = ""
-                    # prompt = r.recognize_google(audio, language="en-EN", show_all=False)
+                    prompt = r.recognize_google(audio, language="en-EN", show_all=False)
+                    # prompt = "Use DetectCleanliness tool and tell me if it is messy"
                     print("You asked:", prompt)
-                    prompt = "Use DetectCleanliness tool and tell me if it is messy"
                     agent_runner = MultiToolAgent()
                     llm_with_image_context = agent_runner.run_prompts([f"{prompt.lower()}"])
                     # LLM TEST #########################
                     if llm_with_image_context != "" and glob_tool_call_history and glob_tool_call_history[-1] == ToolCall.DETECT_CLEANINESS:
-                        print(llm_with_image_context)
                         # Speak the response
                         engine.say(llm_with_image_context)
                         engine.runAndWait()
@@ -1238,9 +1254,9 @@ if __name__ == "__main__":
             set_gripper_async_flag_max_cnt = 5  # 20
             if (
                 target_reached is True
-                and (
-                    (size_distance_target < 160 and target_detected == "toothbrush" and target_orientation == "vertical")
-                    or (size_distance_target < 230 and target_detected == "fork" and target_orientation == "vertical")
+                or (
+                    (size_distance_target < 263 and target_detected == "toothbrush" and target_orientation == "vertical")
+                    or (size_distance_target < 160 and target_detected == "fork" and target_orientation == "vertical")
                 )
                 and set_gripper_async_flag < set_gripper_async_flag_max_cnt
             ):
@@ -1347,14 +1363,15 @@ if __name__ == "__main__":
                         if set_async_flag == 0:  # only execute if there is no async movement
                             # x forward / backward #y left / right #z up / down
                             if target_orientation == "vertical":
-                                mycobot.send_coords(
-                                    [float(moving_coords[0]), float(moving_coords[1]), float(moving_coords[2]), float(moving_coords[3]), float(moving_coords[4]), float(180.0)]
-                                )  # gripper points down
+                                curr_angles = mycobot.get_angles()
+                                mycobot.send_angles(
+                                    [float(curr_angles[0]), float(curr_angles[1]), float(curr_angles[2]), float(curr_angles[3]), float(curr_angles[4]), float(90.0)]
+                                )
                                 mycobot.send_cartesian_waypoint([float(rel_diff_x), float(rel_diff_y), float(rel_diff_z), float(0), float(0), float(0)])
                             else:  # horizontal
                                 mycobot.send_cartesian_waypoint([float(rel_diff_x), float(rel_diff_y), float(rel_diff_z), float(0), float(0), float(0)])
                             # start_ros_movement = False    # reset movement flags after gripper action, start new voice input
-                            # start_yolo_detection = False  # reset detection flags
+                            start_yolo_detection = False  # reset detection flags # set to true if you want continous detection and close loop movement
                             target_reached = True  # set flag to indicate target reached by the gripper
                         # update resync counter due to rounding and other precision limitations
                         print("  ")
