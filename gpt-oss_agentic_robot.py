@@ -715,7 +715,7 @@ class Object_detect:
         return frame
 
     def generate_pipe_json_response(self, img_dat, prmpt="Is it dirty or messy in the picture?"):
-        data = json.dumps({"model": "bakllava", "prompt": "Is it dirty or messy in the picture?", "images": img_dat})
+        data = json.dumps({"model": "bakllava", "prompt": prmpt, "images": img_dat})
         full_response = ""
         line = ""
         with jsonstreams.Stream(jsonstreams.Type.array, filename="./response_log.txt") as output:
@@ -784,6 +784,7 @@ class Object_detect:
                  size_distance_target (float) - size distance to target (gets smaller if object is closer)
         """
         target_detected = ""
+        target_orientation = ""
         detect_center_x = 0
         detect_center_y = 0
         size_distance_target = 0
@@ -815,18 +816,25 @@ class Object_detect:
         yolo_ret = _yolo_inf.run()
         for i in range(0, len(yolo_ret)):
             # if yolo_ret[i][0] == "person" or
-            if yolo_ret[i][0] == "fork" or yolo_ret[i][0] == "banana":  # \
+            if yolo_ret[i][0] == "fork" or yolo_ret[i][0] == "toothbrush":  # \
                 # or yolo_ret[i][0] == "person":
                 target_detected = yolo_ret[i][0]
                 # calculate new center target of the dectected reqctangle object
                 detect_xmin, detect_ymin, detect_xmax, detect_ymax = self.convert_yolo_v5_coordinates_to_ros_resolution(
                     yolo_ret[i][1], yolo_ret[i][2], yolo_ret[i][3], yolo_ret[i][4]
                 )
+                # detect orientation of object
+                w = detect_xmax - detect_xmin
+                h = detect_ymax - detect_ymin
+                if w > h:
+                    target_orientation = "horizontal"
+                else:
+                    target_orientation = "vertical"
                 detect_center_x = (detect_xmin + detect_xmax) / 2
                 detect_center_y = (detect_ymin + detect_ymax) / 2
                 width_pxl_to_size = detect_xmax - detect_xmin  # set new width determined by object size # set depth information
                 f = im_yolo_image.size[1]
-                W = 2  # 2cm real width of small fork
+                W = 2  # 2cm real width of small toothbrush or fork
                 d = (W * f) / width_pxl_to_size
                 size_distance_target = d * 10  # scale to cm
                 size_distance_target *= 1.6875  # for 640x640 -> for 1920x1080 this is * 1.6875 (1080/640)
@@ -844,7 +852,7 @@ class Object_detect:
                     except Exception as error:
                         # handle the exception
                         engine.runAndWait()
-        return target_detected, start_ros_movement, detect_center_x, detect_center_y, size_distance_target
+        return target_detected, start_ros_movement, detect_center_x, detect_center_y, size_distance_target, target_orientation
 
 
 import dotenv
@@ -981,11 +989,8 @@ if __name__ == "__main__":
     HOST = socket.gethostbyname(socket.gethostname())
     PORT = 9000
     mycobot = MycobotServer("192.168.178.31", PORT)
-    # coords_arr = [float(182), float(121), float(151), float(175), float(0), float(0)]
-    # mycobot.send_coords(coords_arr)
     time.sleep(4)
     mycobot.send_angles([float(65), float(-3), float(-90), float(90), float(10), float(10)])  # upright position
-    ret_coord = mycobot.get_coords()
     time.sleep(1)
     # init speach engine
     engine = pyttsx3.init()
@@ -1128,22 +1133,12 @@ if __name__ == "__main__":
             # d = distance in cm (object to camera)
             # W = object width in cm
             W = 6.3  # cm std. disctance between eyes is 6.3cm
-            # # Finding the Focal Length
-            # d = 50 cm
+            # Finding the Focal Length
+            # manual calibration of the sensor if frame.shape[1] == 1920 | if frame.shape[1] == 640: #640p
             # f = (width_pxl*d)/W #w = 1280(1280x720) pixel #W = 6,3
-            # print(f)
-            # manual calibration of the sensor
-            # f = (50*width_pxl)/W
-            # Setting distance
-            # if frame.shape[1] == 1280:
-            #    f = 1228
-            # elif frame.shape[1] == 1920:
-            #    f = 1929
-            # elif frame.shape[1] == 640: #640p
-            #    f = 643
-
             f = frame.shape[1]
             d = (W * f) / width_pxl
+            # Setting distance
             w = d
             # w = 100 - d
             detector.putTextRect(frame, f"Depth: {int(d)}cm", (face[10][0] - 100, face[10][1] - 50), scale=2)
@@ -1175,19 +1170,18 @@ if __name__ == "__main__":
             and start_ros_movement is False
             and start_yolo_detection is False
             and (first_run is True or resync_cnt == 0 or set_gripper_async_flag == 0)
-        ):  # do not start detection during first run #do not detect during movement in case resync count is not 0(no movemnt in case resyc_cnt is zero)
-            # for audio input
+        ):  # do not start detection during first run #do not detect during movement in case resync count is not 0
+            # (no movement in case resync_cnt is zero)
             # set initial angles
             # mycobot.send_angles([float(80), float(-20), float(-20), float(-20), float(0), float(0)])  # DBG ONLY
             mycobot.send_angles([float(40), float(-20), float(-20), float(-20), float(0), float(0)])  # DBG MIDDLE POSITION
-
             # mycobot.send_angles([float(130), float(-20), float(-20), float(-20), float(0), float(0)])
             # select microphone
             for index, name in enumerate(sr.Microphone.list_microphone_names()):
                 # print(f"Device {index}: {name}")
                 if "Life" in name:  # Robot Mic
                     mic_index = index
-                    print(f"Using microphone: {name} at index {mic_index}")
+                    print(f"Using microphone: index {mic_index}")
             while True:
                 success, glob_frame_bakllava = cap.read()
                 glob_frame_bakllava = cv2.resize(glob_frame_bakllava, (X_MAX_RES_ROBOT_ROS, Y_MAX_RES_ROBOT_ROS), interpolation=cv2.INTER_AREA)
@@ -1226,7 +1220,9 @@ if __name__ == "__main__":
                     engine.runAndWait()
 
         if start_yolo_detection is True:
-            target_detected, start_ros_movement, detect_center_x, detect_center_y, size_distance_target = detect.yolov5_detection_run(yolo_inf, cap, engine, start_ros_movement)
+            target_detected, start_ros_movement, detect_center_x, detect_center_y, size_distance_target, target_orientation = detect.yolov5_detection_run(
+                yolo_inf, cap, engine, start_ros_movement
+            )
             initial_size_distance_target = size_distance_target
             print("initial_target_size ", initial_size_distance_target)
 
@@ -1240,7 +1236,14 @@ if __name__ == "__main__":
             print("first_run", first_run)
             # ctrl gripper
             set_gripper_async_flag_max_cnt = 5  # 20
-            if (target_reached is True or size_distance_target < 160) and set_gripper_async_flag < set_gripper_async_flag_max_cnt:
+            if (
+                target_reached is True
+                and (
+                    (size_distance_target < 160 and target_detected == "toothbrush" and target_orientation == "vertical")
+                    or (size_distance_target < 230 and target_detected == "fork" and target_orientation == "vertical")
+                )
+                and set_gripper_async_flag < set_gripper_async_flag_max_cnt
+            ):
                 if set_gripper_async_flag == 0 or set_gripper_async_flag > set_gripper_async_flag_max_cnt / 2:
                     gripper_open = 0
                     set_gripper_async_flag = 1
@@ -1261,6 +1264,8 @@ if __name__ == "__main__":
                     print("set gripper close: {}".format(gripper_close))
                     mycobot.send_angles([float(90), float(-20), float(-20), float(-20), float(0), float(0)])
                     start_ros_movement = False  # reset movement flags after gripper action
+                    start_yolo_detection = False
+                    first_run = True
                     target_reached = False  # reset target reached flag
 
             frame_limit_num = 2  # 25
@@ -1290,14 +1295,14 @@ if __name__ == "__main__":
                 print("  |/-----------Y")
 
                 # initial starting point to initiate tracking
-                temp_x = X_MAX_RES_ROBOT_ROS / 2  # rel_diff_x = detect_center_x - X_MAX_RES_ROBOT_ROS/2 # center of the the fork in the middle means no error
+                temp_x = X_MAX_RES_ROBOT_ROS / 2  # rel_diff_x = detect_center_x - X_MAX_RES_ROBOT_ROS/2 # center of the the object in the middle means no error
                 temp_y = Y_MAX_RES_ROBOT_ROS / 2  # rel_diff_y = detect_center_y - Y_MAX_RES_ROBOT_ROS/2
                 # temp_z = moving_coords[2]  # set z i.e. current height of the gripper
                 temp_z = 0  # the robot will detect the distance to the object via camera
                 # initial starting point to initiate static movement
-
                 print("initial_angles=", initial_angles)
                 print("initial last detecting point_x,y,z=", temp_x, temp_y, temp_z)
+                frame_cnt = 2
                 first_run = False
             else:  # limit to frame_limit_num frames
                 if frame_cnt >= frame_limit_num:
@@ -1316,14 +1321,17 @@ if __name__ == "__main__":
                     #   |  /
                     #   | /
                     #   |/-----------Y
-                    rel_diff_x = -error_x * 0.05  # *0.05 because X_MAX_RES_ROBOT_ROS x Y_MAX_RES_ROBOT_ROS needs to be scaled to centimeter of robot
-                    rel_diff_y = -error_y * 0.05  # *0.05 because X_MAX_RES_ROBOT_ROS x Y_MAX_RES_ROBOT_ROS needs to be scaled to centimeter of robot
-                    rel_diff_z = -error_z * 0.1  # *0.1 because distance needs to be scaled to centimeter
-                    # rel_diff_z = -rel_diff_z  # -rel_diff_z is move forward if trash comes near and w is small in case trash is near
+                    if target_orientation == "vertical":
+                        rel_diff_x = -error_x * 0.05  # *0.05 because X_MAX_RES_ROBOT_ROS x Y_MAX_RES_ROBOT_ROS needs to be scaled to centimeter of robot
+                        rel_diff_y = -error_y * 0.05  # *0.05 because X_MAX_RES_ROBOT_ROS x Y_MAX_RES_ROBOT_ROS needs to be scaled to centimeter of robot
+                        rel_diff_z = -error_z * 0.0375  # *0.0375 because distance needs to be scaled to centimeter
+                        # rel_diff_z = -rel_diff_z    # -rel_diff_z is move forward if trash comes near and w is small in case trash is near
+                    else:  # horizontal
+                        rel_diff_x = -error_x * 0.001  # *0.001 because X_MAX_RES_ROBOT_ROS x Y_MAX_RES_ROBOT_ROS needs to be scaled to centimeter of robot
+                        rel_diff_y = -error_y * 0.001  # *0.001 because X_MAX_RES_ROBOT_ROS x Y_MAX_RES_ROBOT_ROS needs to be scaled to centimeter of robot
+                        rel_diff_z = -error_z * 0.0175  # *0.0175 because distance needs to be scaled to centimeter (less because horizontal is bigger scale)
 
-                    print("w: ", w)
                     print("rel_diff_z,y,x=", rel_diff_z, rel_diff_y, rel_diff_x)
-
                     rel_diff_z_min = 1
                     rel_diff_z_max = 30
                     rel_diff_y_min = 1
@@ -1338,10 +1346,16 @@ if __name__ == "__main__":
                     ):
                         if set_async_flag == 0:  # only execute if there is no async movement
                             # x forward / backward #y left / right #z up / down
-                            mycobot.send_cartesian_waypoint([float(rel_diff_x), float(rel_diff_y), float(rel_diff_z), float(0), float(0), float(0)])
-                            # start_ros_movement = False #reset movement flags after gripper action, start new voice input
+                            if target_orientation == "vertical":
+                                mycobot.send_coords(
+                                    [float(moving_coords[0]), float(moving_coords[1]), float(moving_coords[2]), float(moving_coords[3]), float(moving_coords[4]), float(180.0)]
+                                )  # gripper points down
+                                mycobot.send_cartesian_waypoint([float(rel_diff_x), float(rel_diff_y), float(rel_diff_z), float(0), float(0), float(0)])
+                            else:  # horizontal
+                                mycobot.send_cartesian_waypoint([float(rel_diff_x), float(rel_diff_y), float(rel_diff_z), float(0), float(0), float(0)])
+                            # start_ros_movement = False    # reset movement flags after gripper action, start new voice input
                             # start_yolo_detection = False  # reset detection flags
-                            target_reached = True  # set flag for target reached by the gripper
+                            target_reached = True  # set flag to indicate target reached by the gripper
                         # update resync counter due to rounding and other precision limitations
                         print("  ")
                         resync_cnt += 1
