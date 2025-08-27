@@ -1190,9 +1190,8 @@ if __name__ == "__main__":
         ):  # do not start detection during first run #do not detect during movement in case resync count is not 0
             # (no movement in case resync_cnt is zero)
             # set initial angles
-            # mycobot.send_angles([float(80), float(-20), float(-20), float(-20), float(0), float(0)])  # DBG ONLY
-            mycobot.send_angles([float(40), float(-20), float(-20), float(-20), float(0), float(0)])  # DBG MIDDLE POSITION
-            # mycobot.send_angles([float(130), float(-20), float(-20), float(-20), float(0), float(0)])
+            # mycobot.send_angles([float(40), float(-20), float(-20), float(-20), float(0), float(0)])  # DBG
+            mycobot.send_angles([float(130), float(-20), float(-30), float(-30), float(0), float(0)])  # Target
             # select microphone
             for index, name in enumerate(sr.Microphone.list_microphone_names()):
                 # print(f"Device {index}: {name}")
@@ -1216,23 +1215,23 @@ if __name__ == "__main__":
                     prompt = ""  # "Use DetectCleanliness tool and tell me if it is messy"
                     response_text = ""
                     prompt = r.recognize_google(audio, language="en-EN", show_all=False)
-                    # prompt = "Use DetectCleanliness tool and tell me if it is messy"
                     print("You asked:", prompt)
                     agent_runner = MultiToolAgent()
                     llm_with_image_context = agent_runner.run_prompts([f"{prompt.lower()}"])
                     # LLM TEST #########################
                     if llm_with_image_context != "" and glob_tool_call_history and glob_tool_call_history[-1] == ToolCall.DETECT_CLEANINESS:
                         # Speak the response
+                        llm_with_image_context = llm_with_image_context.replace("*", "")  # gpt-oss loves *
                         engine.say(llm_with_image_context)
                         engine.runAndWait()
                         frame = glob_frame_bakllava  # use new image for processing
-                        if ("messy" in llm_with_image_context.lower()) or ("is dirty" in llm_with_image_context.lower()) or ("yes" in llm_with_image_context.lower()):
+                        if ("it is messy" in llm_with_image_context.lower()) or ("it is dirty" in llm_with_image_context.lower()) or ("yes" in llm_with_image_context.lower()):
                             start_yolo_detection = True  # set flag because its messy
                             break
                 # Catch if error
                 except Exception as error:
                     # handle the exception
-                    # print("An exception occurred:", error)
+                    print("An exception occurred:", error)
                     engine.runAndWait()
 
         if start_yolo_detection is True:
@@ -1254,8 +1253,8 @@ if __name__ == "__main__":
             set_gripper_async_flag_max_cnt = 5  # 20
             if (
                 target_reached is True
-                or (
-                    (size_distance_target < 263 and target_detected == "toothbrush" and target_orientation == "vertical")
+                and (
+                    (size_distance_target < 160 and target_detected == "toothbrush" and target_orientation == "vertical")
                     or (size_distance_target < 160 and target_detected == "fork" and target_orientation == "vertical")
                 )
                 and set_gripper_async_flag < set_gripper_async_flag_max_cnt
@@ -1284,8 +1283,8 @@ if __name__ == "__main__":
                     first_run = True
                     target_reached = False  # reset target reached flag
 
-            frame_limit_num = 2  # 25
-            frame_resync_limit_num = 5  # 35
+            frame_limit_num = 2
+            frame_resync_limit_num = 5
             print("set_gripper_async_flag", set_gripper_async_flag)
             print("frame_limit_num", frame_limit_num)
             print("resync_cnt", resync_cnt)
@@ -1340,8 +1339,7 @@ if __name__ == "__main__":
                     if target_orientation == "vertical":
                         rel_diff_x = -error_x * 0.05  # *0.05 because X_MAX_RES_ROBOT_ROS x Y_MAX_RES_ROBOT_ROS needs to be scaled to centimeter of robot
                         rel_diff_y = -error_y * 0.05  # *0.05 because X_MAX_RES_ROBOT_ROS x Y_MAX_RES_ROBOT_ROS needs to be scaled to centimeter of robot
-                        rel_diff_z = -error_z * 0.0375  # *0.0375 because distance needs to be scaled to centimeter
-                        # rel_diff_z = -rel_diff_z    # -rel_diff_z is move forward if trash comes near and w is small in case trash is near
+                        rel_diff_z = -error_z * 0.07  # *0.07 because distance needs to be scaled to centimeter
                     else:  # horizontal
                         rel_diff_x = -error_x * 0.001  # *0.001 because X_MAX_RES_ROBOT_ROS x Y_MAX_RES_ROBOT_ROS needs to be scaled to centimeter of robot
                         rel_diff_y = -error_y * 0.001  # *0.001 because X_MAX_RES_ROBOT_ROS x Y_MAX_RES_ROBOT_ROS needs to be scaled to centimeter of robot
@@ -1384,5 +1382,6 @@ if __name__ == "__main__":
                         if abs(rel_diff_x) < rel_diff_x_min or abs(rel_diff_x) > rel_diff_x_max:
                             print("-->DIFF X ERROR<--")
                     print("#################################")
+                    frame_cnt = 0
                 else:  # update frame to ensure enought time for the actual movement
                     frame_cnt += 1
