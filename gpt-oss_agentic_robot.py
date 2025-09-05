@@ -1028,6 +1028,8 @@ if __name__ == "__main__":
     # init mycobot
     detect.run()
     _init_ = 20
+    gripper_open = 0
+    gripper_close = 1
     nparams = 0
     resync_cnt = 0
     first_run = True
@@ -1055,7 +1057,8 @@ if __name__ == "__main__":
     while moving_coords == []:
         moving_coords = mycobot.get_coords()
     print("initial_current_cords=", moving_coords)
-    # while cv2.waitKey(1) < 0:
+    # open gripper
+    mycobot.set_gripper_state(gripper_open, 95)
     while True:
         # read camera
         success, frame = cap.read()
@@ -1190,7 +1193,7 @@ if __name__ == "__main__":
         ):  # do not start detection during first run #do not detect during movement in case resync count is not 0
             # (no movement in case resync_cnt is zero)
             # set initial angles
-            # mycobot.send_angles([float(40), float(-20), float(-20), float(-20), float(0), float(0)])  # DBG
+            # mycobot.send_angles([float(40), float(-20), float(-20), float(-20), float(0), float(0)]) # DBG
             mycobot.send_angles([float(130), float(-20), float(-30), float(-30), float(0), float(0)])  # Target
             # select microphone
             for index, name in enumerate(sr.Microphone.list_microphone_names()):
@@ -1260,7 +1263,6 @@ if __name__ == "__main__":
                 and set_gripper_async_flag < set_gripper_async_flag_max_cnt
             ):
                 if set_gripper_async_flag == 0 or set_gripper_async_flag > set_gripper_async_flag_max_cnt / 2:
-                    gripper_open = 0
                     set_gripper_async_flag = 1
                     cnt = 0
                     while cnt < 3:
@@ -1270,7 +1272,6 @@ if __name__ == "__main__":
                     print("set gripper open: {}".format(gripper_open))
                 else:
                     set_gripper_async_flag += 1
-                    gripper_close = 1
                     cnt = 0
                     while cnt < 3:
                         mycobot.set_gripper_state(gripper_close, 95)
@@ -1298,7 +1299,7 @@ if __name__ == "__main__":
                 moving_coords = []
                 while moving_coords == []:
                     moving_coords = mycobot.get_coords()  # x, y, z, rx, ry, rz
-                    # xyz the position in 3d space # rx, ry, rz the rotation in euler anglesj of the end end effector
+                    # xyz the position in 3d space # rx, ry, rz the rotation in euler angles of the end effector
                 print("moving_coords=", moving_coords)
                 print(f"moving_coords\n x:{moving_coords[0]} \n y:{moving_coords[1]} \n z:{moving_coords[2]}")
                 print(" === RESYNC === ")
